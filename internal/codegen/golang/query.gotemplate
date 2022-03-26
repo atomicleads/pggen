@@ -27,6 +27,7 @@ type Querier interface {
 type DBQuerier struct {
 	conn  genericConn   // underlying Postgres transport to use
 	types *typeResolver // resolve types by name
+    hook *TracingHook
 }
 
 var _ Querier = &DBQuerier{}
@@ -58,7 +59,7 @@ func NewQuerier(conn genericConn) *DBQuerier {
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
 func (q *DBQuerier) WithTx(tx pgx.Tx) (*DBQuerier, error) {
-	return &DBQuerier{conn: tx}, nil
+	return &DBQuerier{conn: tx,hook: NewTracingHook()}, nil
 }
 
 {{- range .Declarers}}{{- "\n\n" -}}{{ .Declare $.PkgPath }}{{ end -}}
@@ -72,19 +73,23 @@ const {{ $q.SQLVarName }} = {{ $q.EmitPreparedSQL }}
 {{- "\n\n" -}}
 // {{ $q.Name }} implements Querier.{{ $q.Name }}.
 func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ $q.EmitResultType }}, error) {
+    ctx, _ = q.hook.BeforeProcess(ctx, "{{ $q.Name }}", {{ $q.SQLVarName }})
 	ctx = context.WithValue(ctx, "pggen_query_name", "{{ $q.Name }}")
 {{- if eq $q.ResultKind ":one" }}
 	row := q.conn.QueryRow(ctx, {{ $q.SQLVarName }} {{- $q.EmitParamNames }})
 	{{ $q.EmitResultTypeInit "item" }}
 	{{- $q.EmitResultDecoders }}
 	if err := row.Scan({{ $q.EmitRowScanArgs }}); err != nil {
+        _ = q.hook.AfterProcess(ctx, err)
 		return {{ $q.EmitResultExpr "item" }}, fmt.Errorf("query {{ $q.Name }}: %w", err)
 	}
 	{{- $q.EmitResultAssigns "item" }}
+    _ = q.hook.AfterProcess(ctx, nil)
 	return {{ $q.EmitResultExpr "item" }}, nil
 {{- else if eq $q.ResultKind ":many" }}
 	rows, err := q.conn.Query(ctx, {{ $q.SQLVarName }} {{- $q.EmitParamNames }})
 	if err != nil {
+        _ = q.hook.AfterProcess(ctx, err)
 		return nil, fmt.Errorf("query {{ $q.Name }}: %w", err)
 	}
 	defer rows.Close()
@@ -99,14 +104,18 @@ func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ 
 		items = append(items, {{ $q.EmitResultExpr "item" }})
 	}
 	if err := rows.Err(); err != nil {
+        _ = q.hook.AfterProcess(ctx, err)
 		return nil, fmt.Errorf("close {{ $q.Name }} rows: %w", err)
 	}
+    _ = q.hook.AfterProcess(ctx, nil)
 	return items, err
 {{- else if eq $q.ResultKind ":exec" }}
 	cmdTag, err := q.conn.Exec(ctx, {{ $q.SQLVarName }} {{- $q.EmitParamNames }})
 	if err != nil {
+        _ = q.hook.AfterProcess(ctx, err)
 		return cmdTag, fmt.Errorf("exec query {{ $q.Name }}: %w", err)
 	}
+    _ = q.hook.AfterProcess(ctx, nil)
 	return cmdTag, err
 {{- end }}
 }
