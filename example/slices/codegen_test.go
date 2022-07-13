@@ -1,15 +1,16 @@
-package composite
+package slices
 
 import (
 	"github.com/jschaf/pggen"
+	"github.com/jschaf/pggen/internal/difftest"
 	"github.com/jschaf/pggen/internal/pgtest"
 	"github.com/stretchr/testify/assert"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestGenerate_Go_Example_Composite(t *testing.T) {
+func TestGenerate_Go_Example_Slices(t *testing.T) {
 	conn, cleanupFunc := pgtest.NewPostgresSchema(t, []string{"schema.sql"})
 	defer cleanupFunc()
 
@@ -19,33 +20,31 @@ func TestGenerate_Go_Example_Composite(t *testing.T) {
 			ConnString: conn.Config().ConnString(),
 			QueryFiles: []string{"query.sql"},
 			OutputDir:  tmpDir,
-			GoPackage:  "composite",
+			GoPackage:  "slices",
 			Language:   pggen.LangGo,
 			TypeOverrides: map[string]string{
-				"_bool": "[]bool",
-				"bool":  "bool",
-				"int8":  "int",
-				"int4":  "int",
-				"text":  "string",
+				"_bool":        "[]bool",
+				"bool":         "bool",
+				"timestamp":    "*time.Time",
+				"_timestamp":   "[]*time.Time",
+				"timestamptz":  "*time.Time",
+				"_timestamptz": "[]time.Time",
 			},
 		})
 	if err != nil {
-		t.Fatalf("Generate(): %s", err)
+		t.Fatalf("Generate() example/slices: %s", err)
 	}
 
 	wantQueriesFile := "query.sql.go"
 	gotQueriesFile := filepath.Join(tmpDir, "query.sql.go")
-	assert.FileExists(t, gotQueriesFile,
-		"Generate() should emit query.sql.go")
-	wantQueries, err := ioutil.ReadFile(wantQueriesFile)
+	assert.FileExists(t, gotQueriesFile, "Generate() should emit query.sql.go")
+	wantQueries, err := os.ReadFile(wantQueriesFile)
 	if err != nil {
 		t.Fatalf("read wanted query.go.sql: %s", err)
 	}
-	gotQueries, err := ioutil.ReadFile(gotQueriesFile)
+	gotQueries, err := os.ReadFile(gotQueriesFile)
 	if err != nil {
 		t.Fatalf("read generated query.go.sql: %s", err)
 	}
-	assert.Equalf(t, string(wantQueries), string(gotQueries),
-		"Got file %s; does not match contents of %s",
-		gotQueriesFile, wantQueriesFile)
+	difftest.AssertSame(t, wantQueries, gotQueries)
 }
