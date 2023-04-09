@@ -6,9 +6,11 @@
 package {{.GoPkg}}
 
 import (
+{{- if .IsLeader -}}
+{{- "\n\n" -}}"backend/app/metrics"
+{{end -}}
 {{ range $pkg := .Imports }}	"{{$pkg}}"
 {{ end -}}
-    "backend/app/metrics"
 )
 
 
@@ -28,7 +30,7 @@ type Querier interface {
 type DBQuerier struct {
 	conn  genericConn   // underlying Postgres transport to use
 	types *typeResolver // resolve types by name
-	metrics *metrics.Inspector
+	metrics *metrics.Metrics
 }
 
 var _ Querier = &DBQuerier{}
@@ -74,10 +76,10 @@ const {{ $q.SQLVarName }} = {{ $q.EmitPreparedSQL }}
 {{- "\n\n" -}}
 // {{ $q.Name }} implements Querier.{{ $q.Name }}.
 func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ $q.EmitResultType }}, error) {
-    timer := q.metrics.Timer(metrics.SqlLatency, "{{ $q.Name }}")
+    timer := q.metrics.GetSqlLatencyTimer("{{ $q.Name }}")
     defer timer.Measure()
 
-    q.metrics.Inc(metrics.SqlCounter, "{{ $q.Name }}")
+    q.metrics.IncSqlQueries("{{ $q.Name }}")
 
 	ctx = context.WithValue(ctx, "pggen_query_name", "{{ $q.Name }}")
 {{- if eq $q.ResultKind ":one" }}
@@ -85,16 +87,16 @@ func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ 
 	{{ $q.EmitResultTypeInit "item" }}
 	{{- $q.EmitResultDecoders }}
 	if err := row.Scan({{ $q.EmitRowScanArgs }}); err != nil {
-        q.metrics.Inc(metrics.SqlFailure, "{{ $q.Name }}")
+        q.metrics.IncSqlFailure("{{ $q.Name }}")
 		return {{ $q.EmitResultExpr "item" }}, fmt.Errorf("query {{ $q.Name }}: %w", err)
 	}
 	{{- $q.EmitResultAssigns "item" }}
-	q.metrics.Inc(metrics.SqlSuccess, "{{ $q.Name }}")
+	q.metrics.IncSqlSuccess("{{ $q.Name }}")
 	return {{ $q.EmitResultExpr "item" }}, nil
 {{- else if eq $q.ResultKind ":many" }}
 	rows, err := q.conn.Query(ctx, {{ $q.SQLVarName }} {{- $q.EmitParamNames }})
 	if err != nil {
-        q.metrics.Inc(metrics.SqlFailure, "{{ $q.Name }}")
+        q.metrics.IncSqlFailure("{{ $q.Name }}")
 		return nil, fmt.Errorf("query {{ $q.Name }}: %w", err)
 	}
 	defer rows.Close()
@@ -103,25 +105,25 @@ func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ 
 	for rows.Next() {
 		var item {{ $q.EmitResultElem }}
 		if err := rows.Scan({{- $q.EmitRowScanArgs -}}); err != nil {
-		    q.metrics.Inc(metrics.SqlFailure, "{{ $q.Name }}")
+		    q.metrics.IncSqlFailure("{{ $q.Name }}")
 			return nil, fmt.Errorf("scan {{ $q.Name }} row: %w", err)
 		}
 		{{- $q.EmitResultAssigns "nil" }}
 		items = append(items, {{ $q.EmitResultExpr "item" }})
 	}
 	if err := rows.Err(); err != nil {
-        q.metrics.Inc(metrics.SqlFailure, "{{ $q.Name }}")
+        q.metrics.IncSqlFailure("{{ $q.Name }}")
 		return nil, fmt.Errorf("close {{ $q.Name }} rows: %w", err)
 	}
-    q.metrics.Inc(metrics.SqlSuccess, "{{ $q.Name }}")
+    q.metrics.IncSqlSuccess("{{ $q.Name }}")
 	return items, err
 {{- else if eq $q.ResultKind ":exec" }}
 	cmdTag, err := q.conn.Exec(ctx, {{ $q.SQLVarName }} {{- $q.EmitParamNames }})
 	if err != nil {
-        q.metrics.Inc(metrics.SqlFailure, "{{ $q.Name }}")
+        q.metrics.IncSqlFailure("{{ $q.Name }}")
 		return cmdTag, fmt.Errorf("exec query {{ $q.Name }}: %w", err)
 	}
-	q.metrics.Inc(metrics.SqlSuccess, "{{ $q.Name }}")
+	q.metrics.IncSqlSuccess("{{ $q.Name }}")
 	return cmdTag, err
 {{- end }}
 }
