@@ -11,6 +11,9 @@ import (
 {{end -}}
 {{ range $pkg := .Imports }}	"{{$pkg}}"
 {{ end -}}
+{{- "\n\n" -}}"go.opentelemetry.io/otel/trace"
+{{- "\n\n" -}}"go.opentelemetry.io/otel/codes"
+{{- "\n\n" -}}"go.opentelemetry.io/otel/attribute"
 )
 
 
@@ -40,6 +43,7 @@ type DBQuerier struct {
 	conn  genericConn   // underlying Postgres transport to use
 	types *typeResolver // resolve types by name
 	metrics *metrics.Metrics
+	tracer trace.Tracer
 }
 
 var _ Querier = &DBQuerier{}
@@ -73,8 +77,8 @@ type genericBatch interface {
 
 // NewQuerier creates a DBQuerier that implements Querier. conn is typically
 // *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerier(conn genericConn, metrics *metrics.Metrics) *DBQuerier {
-	return NewQuerierConfig(conn, QuerierConfig{}, metrics)
+func NewQuerier(conn genericConn, metrics *metrics.Metrics, tracer trace.Tracer) *DBQuerier {
+	return NewQuerierConfig(conn, QuerierConfig{}, metrics, tracer)
 }
 
 type QuerierConfig struct {
@@ -89,8 +93,8 @@ type QuerierConfig struct {
 
 // NewQuerierConfig creates a DBQuerier that implements Querier with the given
 // config. conn is typically *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerierConfig(conn genericConn, cfg QuerierConfig ,metrics *metrics.Metrics) *DBQuerier {
-	return &DBQuerier{conn: conn, types: newTypeResolver(cfg.DataTypes), metrics: metrics}
+func NewQuerierConfig(conn genericConn, cfg QuerierConfig, metrics *metrics.Metrics, tracer trace.Tracer) *DBQuerier {
+	return &DBQuerier{conn: conn, types: newTypeResolver(cfg.DataTypes), metrics: metrics, tracer: tracer}
 }
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
@@ -135,32 +139,46 @@ func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ 
     timer := q.metrics.GetSqlLatencyTimer("{{ $q.Name }}")
     defer timer.Measure()
 
+    ctx, span := q.tracer.Start(ctx, "/sql/{{ $q.Name }}")
+    defer span.End()
+
     q.metrics.IncSqlQueries("{{ $q.Name }}")
 
 	ctx = context.WithValue(ctx, "pggen_query_name", "{{ $q.Name }}")
 {{- if eq $q.ResultKind ":one" }}
+    span.AddEvent(":one query exec")
 	row := q.conn.QueryRow(ctx, {{ $q.SQLVarName }} {{- $q.EmitParamNames }})
 	{{ $q.EmitResultTypeInit "item" }}
 	{{- $q.EmitResultDecoders }}
+	span.AddEvent(":one row scan")
 	if err := row.Scan({{ $q.EmitRowScanArgs }}); err != nil {
+		span.RecordError(err)
+    	span.SetStatus(codes.Error, err.Error())
         q.metrics.IncSqlFailure("{{ $q.Name }}")
 		return {{ $q.EmitResultExpr "item" }}, fmt.Errorf("query {{ $q.Name }}: %w", err)
 	}
 	{{- $q.EmitResultAssigns "item" }}
 	q.metrics.IncSqlSuccess("{{ $q.Name }}")
+	span.AddEvent(":many row complete")
 	return {{ $q.EmitResultExpr "item" }}, nil
 {{- else if eq $q.ResultKind ":many" }}
+    span.AddEvent(":many query exec")
 	rows, err := q.conn.Query(ctx, {{ $q.SQLVarName }} {{- $q.EmitParamNames }})
 	if err != nil {
+		span.RecordError(err)
+    	span.SetStatus(codes.Error, err.Error())
         q.metrics.IncSqlFailure("{{ $q.Name }}")
 		return nil, fmt.Errorf("query {{ $q.Name }}: %w", err)
 	}
 	defer rows.Close()
+	span.AddEvent(":many row scan")
 	{{ $q.EmitResultTypeInit "items" }}
 	{{- $q.EmitResultDecoders }}
 	for rows.Next() {
 		var item {{ $q.EmitResultElem }}
 		if err := rows.Scan({{- $q.EmitRowScanArgs -}}); err != nil {
+            span.RecordError(err)
+            span.SetStatus(codes.Error, err.Error())
 		    q.metrics.IncSqlFailure("{{ $q.Name }}")
 			return nil, fmt.Errorf("scan {{ $q.Name }} row: %w", err)
 		}
@@ -168,18 +186,30 @@ func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ 
 		items = append(items, {{ $q.EmitResultExpr "item" }})
 	}
 	if err := rows.Err(); err != nil {
+		span.RecordError(err)
+    	span.SetStatus(codes.Error, err.Error())
         q.metrics.IncSqlFailure("{{ $q.Name }}")
 		return nil, fmt.Errorf("close {{ $q.Name }} rows: %w", err)
 	}
     q.metrics.IncSqlSuccess("{{ $q.Name }}")
+
+    span.AddEvent(":many rows complete", trace.WithAttributes(
+		attribute.Int("ResultsCount", len(items)),
+	))
+
+    span.AddEvent(":many query complete", )
 	return items, err
 {{- else if eq $q.ResultKind ":exec" }}
+    span.AddEvent(":exec query exec")
 	cmdTag, err := q.conn.Exec(ctx, {{ $q.SQLVarName }} {{- $q.EmitParamNames }})
 	if err != nil {
+		span.RecordError(err)
+    	span.SetStatus(codes.Error, err.Error())
         q.metrics.IncSqlFailure("{{ $q.Name }}")
 		return cmdTag, fmt.Errorf("exec query {{ $q.Name }}: %w", err)
 	}
 	q.metrics.IncSqlSuccess("{{ $q.Name }}")
+	span.AddEvent("query complete")
 	return cmdTag, err
 {{- end }}
 }
