@@ -139,7 +139,7 @@ func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ 
     timer := q.metrics.GetSqlLatencyTimer("{{ $q.Name }}")
     defer timer.Measure()
 
-    ctx, span := q.tracer.Start(ctx, "/sql/{{ $q.Name }}")
+    ctx, span := q.tracer.Start(ctx, "sql:{{ $q.Name }}")
     defer span.End()
 
     q.metrics.IncSqlQueries("{{ $q.Name }}")
