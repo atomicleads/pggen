@@ -16,28 +16,29 @@ func TestGenerate_Go_Example_Domain(t *testing.T) {
 	tmpDir := t.TempDir()
 	err := pggen.Generate(
 		pggen.GenerateOptions{
-			ConnString: conn.Config().ConnString(),
-			QueryFiles: []string{"query.sql"},
-			OutputDir:  tmpDir,
-			GoPackage:  "domain",
-			Language:   pggen.LangGo,
+			ConnString:       conn.Config().ConnString(),
+			QueryFiles:       []string{"query.sql"},
+			OutputDir:        tmpDir,
+			GoPackage:        "domain",
+			Language:         pggen.LangGo,
+			InlineParamCount: 2,
 		})
 	if err != nil {
 		t.Fatalf("Generate() example/domain: %s", err)
 	}
 
-	wantQueriesFile := "query.sql.go"
-	gotQueriesFile := filepath.Join(tmpDir, "query.sql.go")
-	assert.FileExists(t, gotQueriesFile, "Generate() should emit query.sql.go")
-	wantQueries, err := os.ReadFile(wantQueriesFile)
+	wantQueryFile := "query.sql.go"
+	gotQueryFile := filepath.Join(tmpDir, "query.sql.go")
+	assert.FileExists(t, gotQueryFile, "Generate() should emit query.sql.go")
+	wantQueries, err := os.ReadFile(wantQueryFile)
 	if err != nil {
 		t.Fatalf("read wanted query.go.sql: %s", err)
 	}
-	gotQueries, err := os.ReadFile(gotQueriesFile)
+	gotQueries, err := os.ReadFile(gotQueryFile)
 	if err != nil {
 		t.Fatalf("read generated query.go.sql: %s", err)
 	}
 	assert.Equalf(t, string(wantQueries), string(gotQueries),
 		"Got file %s; does not match contents of %s",
-		gotQueriesFile, wantQueriesFile)
+		gotQueryFile, wantQueryFile)
 }
