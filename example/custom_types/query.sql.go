@@ -12,31 +12,12 @@ import (
 )
 
 // Querier is a typesafe Go interface backed by SQL queries.
-//
-// Methods ending with Batch enqueue a query to run later in a pgx.Batch. After
-// calling SendBatch on pgx.Conn, pgxpool.Pool, or pgx.Tx, use the Scan methods
-// to parse the results.
 type Querier interface {
 	CustomTypes(ctx context.Context) (CustomTypesRow, error)
-	// CustomTypesBatch enqueues a CustomTypes query into batch to be executed
-	// later by the batch.
-	CustomTypesBatch(batch genericBatch)
-	// CustomTypesScan scans the result of an executed CustomTypesBatch query.
-	CustomTypesScan(results pgx.BatchResults) (CustomTypesRow, error)
 
 	CustomMyInt(ctx context.Context) (int, error)
-	// CustomMyIntBatch enqueues a CustomMyInt query into batch to be executed
-	// later by the batch.
-	CustomMyIntBatch(batch genericBatch)
-	// CustomMyIntScan scans the result of an executed CustomMyIntBatch query.
-	CustomMyIntScan(results pgx.BatchResults) (int, error)
 
 	IntArray(ctx context.Context) ([][]int32, error)
-	// IntArrayBatch enqueues a IntArray query into batch to be executed
-	// later by the batch.
-	IntArrayBatch(batch genericBatch)
-	// IntArrayScan scans the result of an executed IntArrayBatch query.
-	IntArrayScan(results pgx.BatchResults) ([][]int32, error)
 }
 
 type DBQuerier struct {
@@ -65,34 +46,10 @@ type genericConn interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 }
 
-// genericBatch batches queries to send in a single network request to a
-// Postgres server. This is usually backed by *pgx.Batch.
-type genericBatch interface {
-	// Queue queues a query to batch b. query can be an SQL query or the name of a
-	// prepared statement. See Queue on *pgx.Batch.
-	Queue(query string, arguments ...interface{})
-}
-
 // NewQuerier creates a DBQuerier that implements Querier. conn is typically
 // *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
 func NewQuerier(conn genericConn) *DBQuerier {
-	return NewQuerierConfig(conn, QuerierConfig{})
-}
-
-type QuerierConfig struct {
-	// DataTypes contains pgtype.Value to use for encoding and decoding instead
-	// of pggen-generated pgtype.ValueTranscoder.
-	//
-	// If OIDs are available for an input parameter type and all of its
-	// transitive dependencies, pggen will use the binary encoding format for
-	// the input parameter.
-	DataTypes []pgtype.DataType
-}
-
-// NewQuerierConfig creates a DBQuerier that implements Querier with the given
-// config. conn is typically *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerierConfig(conn genericConn, cfg QuerierConfig) *DBQuerier {
-	return &DBQuerier{conn: conn, types: newTypeResolver(cfg.DataTypes)}
+	return &DBQuerier{conn: conn, types: newTypeResolver()}
 }
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
@@ -100,45 +57,13 @@ func (q *DBQuerier) WithTx(tx pgx.Tx) (*DBQuerier, error) {
 	return &DBQuerier{conn: tx}, nil
 }
 
-// preparer is any Postgres connection transport that provides a way to prepare
-// a statement, most commonly *pgx.Conn.
-type preparer interface {
-	Prepare(ctx context.Context, name, sql string) (sd *pgconn.StatementDescription, err error)
-}
-
-// PrepareAllQueries executes a PREPARE statement for all pggen generated SQL
-// queries in querier files. Typical usage is as the AfterConnect callback
-// for pgxpool.Config
-//
-// pgx will use the prepared statement if available. Calling PrepareAllQueries
-// is an optional optimization to avoid a network round-trip the first time pgx
-// runs a query if pgx statement caching is enabled.
-func PrepareAllQueries(ctx context.Context, p preparer) error {
-	if _, err := p.Prepare(ctx, customTypesSQL, customTypesSQL); err != nil {
-		return fmt.Errorf("prepare query 'CustomTypes': %w", err)
-	}
-	if _, err := p.Prepare(ctx, customMyIntSQL, customMyIntSQL); err != nil {
-		return fmt.Errorf("prepare query 'CustomMyInt': %w", err)
-	}
-	if _, err := p.Prepare(ctx, intArraySQL, intArraySQL); err != nil {
-		return fmt.Errorf("prepare query 'IntArray': %w", err)
-	}
-	return nil
-}
-
 // typeResolver looks up the pgtype.ValueTranscoder by Postgres type name.
 type typeResolver struct {
 	connInfo *pgtype.ConnInfo // types by Postgres type name
 }
 
-func newTypeResolver(types []pgtype.DataType) *typeResolver {
+func newTypeResolver() *typeResolver {
 	ci := pgtype.NewConnInfo()
-	for _, typ := range types {
-		if txt, ok := typ.Value.(textPreferrer); ok && typ.OID != unknownOID {
-			typ.Value = txt.ValueTranscoder
-		}
-		ci.RegisterDataType(typ)
-	}
 	return &typeResolver{connInfo: ci}
 }
 
@@ -179,21 +104,6 @@ func (q *DBQuerier) CustomTypes(ctx context.Context) (CustomTypesRow, error) {
 	return item, nil
 }
 
-// CustomTypesBatch implements Querier.CustomTypesBatch.
-func (q *DBQuerier) CustomTypesBatch(batch genericBatch) {
-	batch.Queue(customTypesSQL)
-}
-
-// CustomTypesScan implements Querier.CustomTypesScan.
-func (q *DBQuerier) CustomTypesScan(results pgx.BatchResults) (CustomTypesRow, error) {
-	row := results.QueryRow()
-	var item CustomTypesRow
-	if err := row.Scan(&item.Column, &item.Int8); err != nil {
-		return item, fmt.Errorf("scan CustomTypesBatch row: %w", err)
-	}
-	return item, nil
-}
-
 const customMyIntSQL = `SELECT '5'::my_int as int5;`
 
 // CustomMyInt implements Querier.CustomMyInt.
@@ -203,21 +113,6 @@ func (q *DBQuerier) CustomMyInt(ctx context.Context) (int, error) {
 	var item int
 	if err := row.Scan(&item); err != nil {
 		return item, fmt.Errorf("query CustomMyInt: %w", err)
-	}
-	return item, nil
-}
-
-// CustomMyIntBatch implements Querier.CustomMyIntBatch.
-func (q *DBQuerier) CustomMyIntBatch(batch genericBatch) {
-	batch.Queue(customMyIntSQL)
-}
-
-// CustomMyIntScan implements Querier.CustomMyIntScan.
-func (q *DBQuerier) CustomMyIntScan(results pgx.BatchResults) (int, error) {
-	row := results.QueryRow()
-	var item int
-	if err := row.Scan(&item); err != nil {
-		return item, fmt.Errorf("scan CustomMyIntBatch row: %w", err)
 	}
 	return item, nil
 }
@@ -242,32 +137,6 @@ func (q *DBQuerier) IntArray(ctx context.Context) ([][]int32, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("close IntArray rows: %w", err)
-	}
-	return items, err
-}
-
-// IntArrayBatch implements Querier.IntArrayBatch.
-func (q *DBQuerier) IntArrayBatch(batch genericBatch) {
-	batch.Queue(intArraySQL)
-}
-
-// IntArrayScan implements Querier.IntArrayScan.
-func (q *DBQuerier) IntArrayScan(results pgx.BatchResults) ([][]int32, error) {
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query IntArrayBatch: %w", err)
-	}
-	defer rows.Close()
-	items := [][]int32{}
-	for rows.Next() {
-		var item []int32
-		if err := rows.Scan(&item); err != nil {
-			return nil, fmt.Errorf("scan IntArrayBatch row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close IntArrayBatch rows: %w", err)
 	}
 	return items, err
 }

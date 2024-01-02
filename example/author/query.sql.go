@@ -11,97 +11,38 @@ import (
 )
 
 // Querier is a typesafe Go interface backed by SQL queries.
-//
-// Methods ending with Batch enqueue a query to run later in a pgx.Batch. After
-// calling SendBatch on pgx.Conn, pgxpool.Pool, or pgx.Tx, use the Scan methods
-// to parse the results.
 type Querier interface {
 	// FindAuthorById finds one (or zero) authors by ID.
 	FindAuthorByID(ctx context.Context, authorID int32) (FindAuthorByIDRow, error)
-	// FindAuthorByIDBatch enqueues a FindAuthorByID query into batch to be executed
-	// later by the batch.
-	FindAuthorByIDBatch(batch genericBatch, authorID int32)
-	// FindAuthorByIDScan scans the result of an executed FindAuthorByIDBatch query.
-	FindAuthorByIDScan(results pgx.BatchResults) (FindAuthorByIDRow, error)
 
 	// FindAuthors finds authors by first name.
 	FindAuthors(ctx context.Context, firstName string) ([]FindAuthorsRow, error)
-	// FindAuthorsBatch enqueues a FindAuthors query into batch to be executed
-	// later by the batch.
-	FindAuthorsBatch(batch genericBatch, firstName string)
-	// FindAuthorsScan scans the result of an executed FindAuthorsBatch query.
-	FindAuthorsScan(results pgx.BatchResults) ([]FindAuthorsRow, error)
 
 	// FindAuthorNames finds one (or zero) authors by ID.
 	FindAuthorNames(ctx context.Context, authorID int32) ([]FindAuthorNamesRow, error)
-	// FindAuthorNamesBatch enqueues a FindAuthorNames query into batch to be executed
-	// later by the batch.
-	FindAuthorNamesBatch(batch genericBatch, authorID int32)
-	// FindAuthorNamesScan scans the result of an executed FindAuthorNamesBatch query.
-	FindAuthorNamesScan(results pgx.BatchResults) ([]FindAuthorNamesRow, error)
 
 	// FindFirstNames finds one (or zero) authors by ID.
 	FindFirstNames(ctx context.Context, authorID int32) ([]*string, error)
-	// FindFirstNamesBatch enqueues a FindFirstNames query into batch to be executed
-	// later by the batch.
-	FindFirstNamesBatch(batch genericBatch, authorID int32)
-	// FindFirstNamesScan scans the result of an executed FindFirstNamesBatch query.
-	FindFirstNamesScan(results pgx.BatchResults) ([]*string, error)
 
 	// DeleteAuthors deletes authors with a first name of "joe".
 	DeleteAuthors(ctx context.Context) (pgconn.CommandTag, error)
-	// DeleteAuthorsBatch enqueues a DeleteAuthors query into batch to be executed
-	// later by the batch.
-	DeleteAuthorsBatch(batch genericBatch)
-	// DeleteAuthorsScan scans the result of an executed DeleteAuthorsBatch query.
-	DeleteAuthorsScan(results pgx.BatchResults) (pgconn.CommandTag, error)
 
 	// DeleteAuthorsByFirstName deletes authors by first name.
 	DeleteAuthorsByFirstName(ctx context.Context, firstName string) (pgconn.CommandTag, error)
-	// DeleteAuthorsByFirstNameBatch enqueues a DeleteAuthorsByFirstName query into batch to be executed
-	// later by the batch.
-	DeleteAuthorsByFirstNameBatch(batch genericBatch, firstName string)
-	// DeleteAuthorsByFirstNameScan scans the result of an executed DeleteAuthorsByFirstNameBatch query.
-	DeleteAuthorsByFirstNameScan(results pgx.BatchResults) (pgconn.CommandTag, error)
 
 	// DeleteAuthorsByFullName deletes authors by the full name.
 	DeleteAuthorsByFullName(ctx context.Context, params DeleteAuthorsByFullNameParams) (pgconn.CommandTag, error)
-	// DeleteAuthorsByFullNameBatch enqueues a DeleteAuthorsByFullName query into batch to be executed
-	// later by the batch.
-	DeleteAuthorsByFullNameBatch(batch genericBatch, params DeleteAuthorsByFullNameParams)
-	// DeleteAuthorsByFullNameScan scans the result of an executed DeleteAuthorsByFullNameBatch query.
-	DeleteAuthorsByFullNameScan(results pgx.BatchResults) (pgconn.CommandTag, error)
 
 	// InsertAuthor inserts an author by name and returns the ID.
 	InsertAuthor(ctx context.Context, firstName string, lastName string) (int32, error)
-	// InsertAuthorBatch enqueues a InsertAuthor query into batch to be executed
-	// later by the batch.
-	InsertAuthorBatch(batch genericBatch, firstName string, lastName string)
-	// InsertAuthorScan scans the result of an executed InsertAuthorBatch query.
-	InsertAuthorScan(results pgx.BatchResults) (int32, error)
 
 	// InsertAuthorSuffix inserts an author by name and suffix and returns the
 	// entire row.
 	InsertAuthorSuffix(ctx context.Context, params InsertAuthorSuffixParams) (InsertAuthorSuffixRow, error)
-	// InsertAuthorSuffixBatch enqueues a InsertAuthorSuffix query into batch to be executed
-	// later by the batch.
-	InsertAuthorSuffixBatch(batch genericBatch, params InsertAuthorSuffixParams)
-	// InsertAuthorSuffixScan scans the result of an executed InsertAuthorSuffixBatch query.
-	InsertAuthorSuffixScan(results pgx.BatchResults) (InsertAuthorSuffixRow, error)
 
 	StringAggFirstName(ctx context.Context, authorID int32) (*string, error)
-	// StringAggFirstNameBatch enqueues a StringAggFirstName query into batch to be executed
-	// later by the batch.
-	StringAggFirstNameBatch(batch genericBatch, authorID int32)
-	// StringAggFirstNameScan scans the result of an executed StringAggFirstNameBatch query.
-	StringAggFirstNameScan(results pgx.BatchResults) (*string, error)
 
 	ArrayAggFirstName(ctx context.Context, authorID int32) ([]string, error)
-	// ArrayAggFirstNameBatch enqueues a ArrayAggFirstName query into batch to be executed
-	// later by the batch.
-	ArrayAggFirstNameBatch(batch genericBatch, authorID int32)
-	// ArrayAggFirstNameScan scans the result of an executed ArrayAggFirstNameBatch query.
-	ArrayAggFirstNameScan(results pgx.BatchResults) ([]string, error)
 }
 
 type DBQuerier struct {
@@ -130,34 +71,10 @@ type genericConn interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 }
 
-// genericBatch batches queries to send in a single network request to a
-// Postgres server. This is usually backed by *pgx.Batch.
-type genericBatch interface {
-	// Queue queues a query to batch b. query can be an SQL query or the name of a
-	// prepared statement. See Queue on *pgx.Batch.
-	Queue(query string, arguments ...interface{})
-}
-
 // NewQuerier creates a DBQuerier that implements Querier. conn is typically
 // *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
 func NewQuerier(conn genericConn) *DBQuerier {
-	return NewQuerierConfig(conn, QuerierConfig{})
-}
-
-type QuerierConfig struct {
-	// DataTypes contains pgtype.Value to use for encoding and decoding instead
-	// of pggen-generated pgtype.ValueTranscoder.
-	//
-	// If OIDs are available for an input parameter type and all of its
-	// transitive dependencies, pggen will use the binary encoding format for
-	// the input parameter.
-	DataTypes []pgtype.DataType
-}
-
-// NewQuerierConfig creates a DBQuerier that implements Querier with the given
-// config. conn is typically *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerierConfig(conn genericConn, cfg QuerierConfig) *DBQuerier {
-	return &DBQuerier{conn: conn, types: newTypeResolver(cfg.DataTypes)}
+	return &DBQuerier{conn: conn, types: newTypeResolver()}
 }
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
@@ -165,69 +82,13 @@ func (q *DBQuerier) WithTx(tx pgx.Tx) (*DBQuerier, error) {
 	return &DBQuerier{conn: tx}, nil
 }
 
-// preparer is any Postgres connection transport that provides a way to prepare
-// a statement, most commonly *pgx.Conn.
-type preparer interface {
-	Prepare(ctx context.Context, name, sql string) (sd *pgconn.StatementDescription, err error)
-}
-
-// PrepareAllQueries executes a PREPARE statement for all pggen generated SQL
-// queries in querier files. Typical usage is as the AfterConnect callback
-// for pgxpool.Config
-//
-// pgx will use the prepared statement if available. Calling PrepareAllQueries
-// is an optional optimization to avoid a network round-trip the first time pgx
-// runs a query if pgx statement caching is enabled.
-func PrepareAllQueries(ctx context.Context, p preparer) error {
-	if _, err := p.Prepare(ctx, findAuthorByIDSQL, findAuthorByIDSQL); err != nil {
-		return fmt.Errorf("prepare query 'FindAuthorByID': %w", err)
-	}
-	if _, err := p.Prepare(ctx, findAuthorsSQL, findAuthorsSQL); err != nil {
-		return fmt.Errorf("prepare query 'FindAuthors': %w", err)
-	}
-	if _, err := p.Prepare(ctx, findAuthorNamesSQL, findAuthorNamesSQL); err != nil {
-		return fmt.Errorf("prepare query 'FindAuthorNames': %w", err)
-	}
-	if _, err := p.Prepare(ctx, findFirstNamesSQL, findFirstNamesSQL); err != nil {
-		return fmt.Errorf("prepare query 'FindFirstNames': %w", err)
-	}
-	if _, err := p.Prepare(ctx, deleteAuthorsSQL, deleteAuthorsSQL); err != nil {
-		return fmt.Errorf("prepare query 'DeleteAuthors': %w", err)
-	}
-	if _, err := p.Prepare(ctx, deleteAuthorsByFirstNameSQL, deleteAuthorsByFirstNameSQL); err != nil {
-		return fmt.Errorf("prepare query 'DeleteAuthorsByFirstName': %w", err)
-	}
-	if _, err := p.Prepare(ctx, deleteAuthorsByFullNameSQL, deleteAuthorsByFullNameSQL); err != nil {
-		return fmt.Errorf("prepare query 'DeleteAuthorsByFullName': %w", err)
-	}
-	if _, err := p.Prepare(ctx, insertAuthorSQL, insertAuthorSQL); err != nil {
-		return fmt.Errorf("prepare query 'InsertAuthor': %w", err)
-	}
-	if _, err := p.Prepare(ctx, insertAuthorSuffixSQL, insertAuthorSuffixSQL); err != nil {
-		return fmt.Errorf("prepare query 'InsertAuthorSuffix': %w", err)
-	}
-	if _, err := p.Prepare(ctx, stringAggFirstNameSQL, stringAggFirstNameSQL); err != nil {
-		return fmt.Errorf("prepare query 'StringAggFirstName': %w", err)
-	}
-	if _, err := p.Prepare(ctx, arrayAggFirstNameSQL, arrayAggFirstNameSQL); err != nil {
-		return fmt.Errorf("prepare query 'ArrayAggFirstName': %w", err)
-	}
-	return nil
-}
-
 // typeResolver looks up the pgtype.ValueTranscoder by Postgres type name.
 type typeResolver struct {
 	connInfo *pgtype.ConnInfo // types by Postgres type name
 }
 
-func newTypeResolver(types []pgtype.DataType) *typeResolver {
+func newTypeResolver() *typeResolver {
 	ci := pgtype.NewConnInfo()
-	for _, typ := range types {
-		if txt, ok := typ.Value.(textPreferrer); ok && typ.OID != unknownOID {
-			typ.Value = txt.ValueTranscoder
-		}
-		ci.RegisterDataType(typ)
-	}
 	return &typeResolver{connInfo: ci}
 }
 
@@ -270,21 +131,6 @@ func (q *DBQuerier) FindAuthorByID(ctx context.Context, authorID int32) (FindAut
 	return item, nil
 }
 
-// FindAuthorByIDBatch implements Querier.FindAuthorByIDBatch.
-func (q *DBQuerier) FindAuthorByIDBatch(batch genericBatch, authorID int32) {
-	batch.Queue(findAuthorByIDSQL, authorID)
-}
-
-// FindAuthorByIDScan implements Querier.FindAuthorByIDScan.
-func (q *DBQuerier) FindAuthorByIDScan(results pgx.BatchResults) (FindAuthorByIDRow, error) {
-	row := results.QueryRow()
-	var item FindAuthorByIDRow
-	if err := row.Scan(&item.AuthorID, &item.FirstName, &item.LastName, &item.Suffix); err != nil {
-		return item, fmt.Errorf("scan FindAuthorByIDBatch row: %w", err)
-	}
-	return item, nil
-}
-
 const findAuthorsSQL = `SELECT * FROM author WHERE first_name = $1;`
 
 type FindAuthorsRow struct {
@@ -312,32 +158,6 @@ func (q *DBQuerier) FindAuthors(ctx context.Context, firstName string) ([]FindAu
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("close FindAuthors rows: %w", err)
-	}
-	return items, err
-}
-
-// FindAuthorsBatch implements Querier.FindAuthorsBatch.
-func (q *DBQuerier) FindAuthorsBatch(batch genericBatch, firstName string) {
-	batch.Queue(findAuthorsSQL, firstName)
-}
-
-// FindAuthorsScan implements Querier.FindAuthorsScan.
-func (q *DBQuerier) FindAuthorsScan(results pgx.BatchResults) ([]FindAuthorsRow, error) {
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query FindAuthorsBatch: %w", err)
-	}
-	defer rows.Close()
-	items := []FindAuthorsRow{}
-	for rows.Next() {
-		var item FindAuthorsRow
-		if err := rows.Scan(&item.AuthorID, &item.FirstName, &item.LastName, &item.Suffix); err != nil {
-			return nil, fmt.Errorf("scan FindAuthorsBatch row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close FindAuthorsBatch rows: %w", err)
 	}
 	return items, err
 }
@@ -371,32 +191,6 @@ func (q *DBQuerier) FindAuthorNames(ctx context.Context, authorID int32) ([]Find
 	return items, err
 }
 
-// FindAuthorNamesBatch implements Querier.FindAuthorNamesBatch.
-func (q *DBQuerier) FindAuthorNamesBatch(batch genericBatch, authorID int32) {
-	batch.Queue(findAuthorNamesSQL, authorID)
-}
-
-// FindAuthorNamesScan implements Querier.FindAuthorNamesScan.
-func (q *DBQuerier) FindAuthorNamesScan(results pgx.BatchResults) ([]FindAuthorNamesRow, error) {
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query FindAuthorNamesBatch: %w", err)
-	}
-	defer rows.Close()
-	items := []FindAuthorNamesRow{}
-	for rows.Next() {
-		var item FindAuthorNamesRow
-		if err := rows.Scan(&item.FirstName, &item.LastName); err != nil {
-			return nil, fmt.Errorf("scan FindAuthorNamesBatch row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close FindAuthorNamesBatch rows: %w", err)
-	}
-	return items, err
-}
-
 const findFirstNamesSQL = `SELECT first_name FROM author ORDER BY author_id = $1;`
 
 // FindFirstNames implements Querier.FindFirstNames.
@@ -421,32 +215,6 @@ func (q *DBQuerier) FindFirstNames(ctx context.Context, authorID int32) ([]*stri
 	return items, err
 }
 
-// FindFirstNamesBatch implements Querier.FindFirstNamesBatch.
-func (q *DBQuerier) FindFirstNamesBatch(batch genericBatch, authorID int32) {
-	batch.Queue(findFirstNamesSQL, authorID)
-}
-
-// FindFirstNamesScan implements Querier.FindFirstNamesScan.
-func (q *DBQuerier) FindFirstNamesScan(results pgx.BatchResults) ([]*string, error) {
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query FindFirstNamesBatch: %w", err)
-	}
-	defer rows.Close()
-	items := []*string{}
-	for rows.Next() {
-		var item string
-		if err := rows.Scan(&item); err != nil {
-			return nil, fmt.Errorf("scan FindFirstNamesBatch row: %w", err)
-		}
-		items = append(items, &item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close FindFirstNamesBatch rows: %w", err)
-	}
-	return items, err
-}
-
 const deleteAuthorsSQL = `DELETE FROM author WHERE first_name = 'joe';`
 
 // DeleteAuthors implements Querier.DeleteAuthors.
@@ -455,20 +223,6 @@ func (q *DBQuerier) DeleteAuthors(ctx context.Context) (pgconn.CommandTag, error
 	cmdTag, err := q.conn.Exec(ctx, deleteAuthorsSQL)
 	if err != nil {
 		return cmdTag, fmt.Errorf("exec query DeleteAuthors: %w", err)
-	}
-	return cmdTag, err
-}
-
-// DeleteAuthorsBatch implements Querier.DeleteAuthorsBatch.
-func (q *DBQuerier) DeleteAuthorsBatch(batch genericBatch) {
-	batch.Queue(deleteAuthorsSQL)
-}
-
-// DeleteAuthorsScan implements Querier.DeleteAuthorsScan.
-func (q *DBQuerier) DeleteAuthorsScan(results pgx.BatchResults) (pgconn.CommandTag, error) {
-	cmdTag, err := results.Exec()
-	if err != nil {
-		return cmdTag, fmt.Errorf("exec DeleteAuthorsBatch: %w", err)
 	}
 	return cmdTag, err
 }
@@ -485,20 +239,6 @@ func (q *DBQuerier) DeleteAuthorsByFirstName(ctx context.Context, firstName stri
 	return cmdTag, err
 }
 
-// DeleteAuthorsByFirstNameBatch implements Querier.DeleteAuthorsByFirstNameBatch.
-func (q *DBQuerier) DeleteAuthorsByFirstNameBatch(batch genericBatch, firstName string) {
-	batch.Queue(deleteAuthorsByFirstNameSQL, firstName)
-}
-
-// DeleteAuthorsByFirstNameScan implements Querier.DeleteAuthorsByFirstNameScan.
-func (q *DBQuerier) DeleteAuthorsByFirstNameScan(results pgx.BatchResults) (pgconn.CommandTag, error) {
-	cmdTag, err := results.Exec()
-	if err != nil {
-		return cmdTag, fmt.Errorf("exec DeleteAuthorsByFirstNameBatch: %w", err)
-	}
-	return cmdTag, err
-}
-
 const deleteAuthorsByFullNameSQL = `DELETE
 FROM author
 WHERE first_name = $1
@@ -506,9 +246,9 @@ WHERE first_name = $1
   AND suffix = $3;`
 
 type DeleteAuthorsByFullNameParams struct {
-	FirstName string
-	LastName  string
-	Suffix    string
+	FirstName string `json:"FirstName"`
+	LastName  string `json:"LastName"`
+	Suffix    string `json:"Suffix"`
 }
 
 // DeleteAuthorsByFullName implements Querier.DeleteAuthorsByFullName.
@@ -517,20 +257,6 @@ func (q *DBQuerier) DeleteAuthorsByFullName(ctx context.Context, params DeleteAu
 	cmdTag, err := q.conn.Exec(ctx, deleteAuthorsByFullNameSQL, params.FirstName, params.LastName, params.Suffix)
 	if err != nil {
 		return cmdTag, fmt.Errorf("exec query DeleteAuthorsByFullName: %w", err)
-	}
-	return cmdTag, err
-}
-
-// DeleteAuthorsByFullNameBatch implements Querier.DeleteAuthorsByFullNameBatch.
-func (q *DBQuerier) DeleteAuthorsByFullNameBatch(batch genericBatch, params DeleteAuthorsByFullNameParams) {
-	batch.Queue(deleteAuthorsByFullNameSQL, params.FirstName, params.LastName, params.Suffix)
-}
-
-// DeleteAuthorsByFullNameScan implements Querier.DeleteAuthorsByFullNameScan.
-func (q *DBQuerier) DeleteAuthorsByFullNameScan(results pgx.BatchResults) (pgconn.CommandTag, error) {
-	cmdTag, err := results.Exec()
-	if err != nil {
-		return cmdTag, fmt.Errorf("exec DeleteAuthorsByFullNameBatch: %w", err)
 	}
 	return cmdTag, err
 }
@@ -550,29 +276,14 @@ func (q *DBQuerier) InsertAuthor(ctx context.Context, firstName string, lastName
 	return item, nil
 }
 
-// InsertAuthorBatch implements Querier.InsertAuthorBatch.
-func (q *DBQuerier) InsertAuthorBatch(batch genericBatch, firstName string, lastName string) {
-	batch.Queue(insertAuthorSQL, firstName, lastName)
-}
-
-// InsertAuthorScan implements Querier.InsertAuthorScan.
-func (q *DBQuerier) InsertAuthorScan(results pgx.BatchResults) (int32, error) {
-	row := results.QueryRow()
-	var item int32
-	if err := row.Scan(&item); err != nil {
-		return item, fmt.Errorf("scan InsertAuthorBatch row: %w", err)
-	}
-	return item, nil
-}
-
 const insertAuthorSuffixSQL = `INSERT INTO author (first_name, last_name, suffix)
 VALUES ($1, $2, $3)
 RETURNING author_id, first_name, last_name, suffix;`
 
 type InsertAuthorSuffixParams struct {
-	FirstName string
-	LastName  string
-	Suffix    string
+	FirstName string `json:"FirstName"`
+	LastName  string `json:"LastName"`
+	Suffix    string `json:"Suffix"`
 }
 
 type InsertAuthorSuffixRow struct {
@@ -593,21 +304,6 @@ func (q *DBQuerier) InsertAuthorSuffix(ctx context.Context, params InsertAuthorS
 	return item, nil
 }
 
-// InsertAuthorSuffixBatch implements Querier.InsertAuthorSuffixBatch.
-func (q *DBQuerier) InsertAuthorSuffixBatch(batch genericBatch, params InsertAuthorSuffixParams) {
-	batch.Queue(insertAuthorSuffixSQL, params.FirstName, params.LastName, params.Suffix)
-}
-
-// InsertAuthorSuffixScan implements Querier.InsertAuthorSuffixScan.
-func (q *DBQuerier) InsertAuthorSuffixScan(results pgx.BatchResults) (InsertAuthorSuffixRow, error) {
-	row := results.QueryRow()
-	var item InsertAuthorSuffixRow
-	if err := row.Scan(&item.AuthorID, &item.FirstName, &item.LastName, &item.Suffix); err != nil {
-		return item, fmt.Errorf("scan InsertAuthorSuffixBatch row: %w", err)
-	}
-	return item, nil
-}
-
 const stringAggFirstNameSQL = `SELECT string_agg(first_name, ',') AS names FROM author WHERE author_id = $1;`
 
 // StringAggFirstName implements Querier.StringAggFirstName.
@@ -621,21 +317,6 @@ func (q *DBQuerier) StringAggFirstName(ctx context.Context, authorID int32) (*st
 	return item, nil
 }
 
-// StringAggFirstNameBatch implements Querier.StringAggFirstNameBatch.
-func (q *DBQuerier) StringAggFirstNameBatch(batch genericBatch, authorID int32) {
-	batch.Queue(stringAggFirstNameSQL, authorID)
-}
-
-// StringAggFirstNameScan implements Querier.StringAggFirstNameScan.
-func (q *DBQuerier) StringAggFirstNameScan(results pgx.BatchResults) (*string, error) {
-	row := results.QueryRow()
-	var item *string
-	if err := row.Scan(&item); err != nil {
-		return item, fmt.Errorf("scan StringAggFirstNameBatch row: %w", err)
-	}
-	return item, nil
-}
-
 const arrayAggFirstNameSQL = `SELECT array_agg(first_name) AS names FROM author WHERE author_id = $1;`
 
 // ArrayAggFirstName implements Querier.ArrayAggFirstName.
@@ -645,21 +326,6 @@ func (q *DBQuerier) ArrayAggFirstName(ctx context.Context, authorID int32) ([]st
 	item := []string{}
 	if err := row.Scan(&item); err != nil {
 		return item, fmt.Errorf("query ArrayAggFirstName: %w", err)
-	}
-	return item, nil
-}
-
-// ArrayAggFirstNameBatch implements Querier.ArrayAggFirstNameBatch.
-func (q *DBQuerier) ArrayAggFirstNameBatch(batch genericBatch, authorID int32) {
-	batch.Queue(arrayAggFirstNameSQL, authorID)
-}
-
-// ArrayAggFirstNameScan implements Querier.ArrayAggFirstNameScan.
-func (q *DBQuerier) ArrayAggFirstNameScan(results pgx.BatchResults) ([]string, error) {
-	row := results.QueryRow()
-	item := []string{}
-	if err := row.Scan(&item); err != nil {
-		return item, fmt.Errorf("scan ArrayAggFirstNameBatch row: %w", err)
 	}
 	return item, nil
 }

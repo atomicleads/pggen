@@ -11,17 +11,8 @@ import (
 )
 
 // Querier is a typesafe Go interface backed by SQL queries.
-//
-// Methods ending with Batch enqueue a query to run later in a pgx.Batch. After
-// calling SendBatch on pgx.Conn, pgxpool.Pool, or pgx.Tx, use the Scan methods
-// to parse the results.
 type Querier interface {
 	DomainOne(ctx context.Context) (string, error)
-	// DomainOneBatch enqueues a DomainOne query into batch to be executed
-	// later by the batch.
-	DomainOneBatch(batch genericBatch)
-	// DomainOneScan scans the result of an executed DomainOneBatch query.
-	DomainOneScan(results pgx.BatchResults) (string, error)
 }
 
 type DBQuerier struct {
@@ -50,34 +41,10 @@ type genericConn interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 }
 
-// genericBatch batches queries to send in a single network request to a
-// Postgres server. This is usually backed by *pgx.Batch.
-type genericBatch interface {
-	// Queue queues a query to batch b. query can be an SQL query or the name of a
-	// prepared statement. See Queue on *pgx.Batch.
-	Queue(query string, arguments ...interface{})
-}
-
 // NewQuerier creates a DBQuerier that implements Querier. conn is typically
 // *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
 func NewQuerier(conn genericConn) *DBQuerier {
-	return NewQuerierConfig(conn, QuerierConfig{})
-}
-
-type QuerierConfig struct {
-	// DataTypes contains pgtype.Value to use for encoding and decoding instead
-	// of pggen-generated pgtype.ValueTranscoder.
-	//
-	// If OIDs are available for an input parameter type and all of its
-	// transitive dependencies, pggen will use the binary encoding format for
-	// the input parameter.
-	DataTypes []pgtype.DataType
-}
-
-// NewQuerierConfig creates a DBQuerier that implements Querier with the given
-// config. conn is typically *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerierConfig(conn genericConn, cfg QuerierConfig) *DBQuerier {
-	return &DBQuerier{conn: conn, types: newTypeResolver(cfg.DataTypes)}
+	return &DBQuerier{conn: conn, types: newTypeResolver()}
 }
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
@@ -85,39 +52,13 @@ func (q *DBQuerier) WithTx(tx pgx.Tx) (*DBQuerier, error) {
 	return &DBQuerier{conn: tx}, nil
 }
 
-// preparer is any Postgres connection transport that provides a way to prepare
-// a statement, most commonly *pgx.Conn.
-type preparer interface {
-	Prepare(ctx context.Context, name, sql string) (sd *pgconn.StatementDescription, err error)
-}
-
-// PrepareAllQueries executes a PREPARE statement for all pggen generated SQL
-// queries in querier files. Typical usage is as the AfterConnect callback
-// for pgxpool.Config
-//
-// pgx will use the prepared statement if available. Calling PrepareAllQueries
-// is an optional optimization to avoid a network round-trip the first time pgx
-// runs a query if pgx statement caching is enabled.
-func PrepareAllQueries(ctx context.Context, p preparer) error {
-	if _, err := p.Prepare(ctx, domainOneSQL, domainOneSQL); err != nil {
-		return fmt.Errorf("prepare query 'DomainOne': %w", err)
-	}
-	return nil
-}
-
 // typeResolver looks up the pgtype.ValueTranscoder by Postgres type name.
 type typeResolver struct {
 	connInfo *pgtype.ConnInfo // types by Postgres type name
 }
 
-func newTypeResolver(types []pgtype.DataType) *typeResolver {
+func newTypeResolver() *typeResolver {
 	ci := pgtype.NewConnInfo()
-	for _, typ := range types {
-		if txt, ok := typ.Value.(textPreferrer); ok && typ.OID != unknownOID {
-			typ.Value = txt.ValueTranscoder
-		}
-		ci.RegisterDataType(typ)
-	}
 	return &typeResolver{connInfo: ci}
 }
 
@@ -149,21 +90,6 @@ func (q *DBQuerier) DomainOne(ctx context.Context) (string, error) {
 	var item string
 	if err := row.Scan(&item); err != nil {
 		return item, fmt.Errorf("query DomainOne: %w", err)
-	}
-	return item, nil
-}
-
-// DomainOneBatch implements Querier.DomainOneBatch.
-func (q *DBQuerier) DomainOneBatch(batch genericBatch) {
-	batch.Queue(domainOneSQL)
-}
-
-// DomainOneScan implements Querier.DomainOneScan.
-func (q *DBQuerier) DomainOneScan(results pgx.BatchResults) (string, error) {
-	row := results.QueryRow()
-	var item string
-	if err := row.Scan(&item); err != nil {
-		return item, fmt.Errorf("scan DomainOneBatch row: %w", err)
 	}
 	return item, nil
 }

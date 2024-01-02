@@ -11,45 +11,16 @@ import (
 )
 
 // Querier is a typesafe Go interface backed by SQL queries.
-//
-// Methods ending with Batch enqueue a query to run later in a pgx.Batch. After
-// calling SendBatch on pgx.Conn, pgxpool.Pool, or pgx.Tx, use the Scan methods
-// to parse the results.
 type Querier interface {
 	VoidOnly(ctx context.Context) (pgconn.CommandTag, error)
-	// VoidOnlyBatch enqueues a VoidOnly query into batch to be executed
-	// later by the batch.
-	VoidOnlyBatch(batch genericBatch)
-	// VoidOnlyScan scans the result of an executed VoidOnlyBatch query.
-	VoidOnlyScan(results pgx.BatchResults) (pgconn.CommandTag, error)
 
 	VoidOnlyTwoParams(ctx context.Context, id int32) (pgconn.CommandTag, error)
-	// VoidOnlyTwoParamsBatch enqueues a VoidOnlyTwoParams query into batch to be executed
-	// later by the batch.
-	VoidOnlyTwoParamsBatch(batch genericBatch, id int32)
-	// VoidOnlyTwoParamsScan scans the result of an executed VoidOnlyTwoParamsBatch query.
-	VoidOnlyTwoParamsScan(results pgx.BatchResults) (pgconn.CommandTag, error)
 
 	VoidTwo(ctx context.Context) (string, error)
-	// VoidTwoBatch enqueues a VoidTwo query into batch to be executed
-	// later by the batch.
-	VoidTwoBatch(batch genericBatch)
-	// VoidTwoScan scans the result of an executed VoidTwoBatch query.
-	VoidTwoScan(results pgx.BatchResults) (string, error)
 
 	VoidThree(ctx context.Context) (VoidThreeRow, error)
-	// VoidThreeBatch enqueues a VoidThree query into batch to be executed
-	// later by the batch.
-	VoidThreeBatch(batch genericBatch)
-	// VoidThreeScan scans the result of an executed VoidThreeBatch query.
-	VoidThreeScan(results pgx.BatchResults) (VoidThreeRow, error)
 
 	VoidThree2(ctx context.Context) ([]string, error)
-	// VoidThree2Batch enqueues a VoidThree2 query into batch to be executed
-	// later by the batch.
-	VoidThree2Batch(batch genericBatch)
-	// VoidThree2Scan scans the result of an executed VoidThree2Batch query.
-	VoidThree2Scan(results pgx.BatchResults) ([]string, error)
 }
 
 type DBQuerier struct {
@@ -78,34 +49,10 @@ type genericConn interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 }
 
-// genericBatch batches queries to send in a single network request to a
-// Postgres server. This is usually backed by *pgx.Batch.
-type genericBatch interface {
-	// Queue queues a query to batch b. query can be an SQL query or the name of a
-	// prepared statement. See Queue on *pgx.Batch.
-	Queue(query string, arguments ...interface{})
-}
-
 // NewQuerier creates a DBQuerier that implements Querier. conn is typically
 // *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
 func NewQuerier(conn genericConn) *DBQuerier {
-	return NewQuerierConfig(conn, QuerierConfig{})
-}
-
-type QuerierConfig struct {
-	// DataTypes contains pgtype.Value to use for encoding and decoding instead
-	// of pggen-generated pgtype.ValueTranscoder.
-	//
-	// If OIDs are available for an input parameter type and all of its
-	// transitive dependencies, pggen will use the binary encoding format for
-	// the input parameter.
-	DataTypes []pgtype.DataType
-}
-
-// NewQuerierConfig creates a DBQuerier that implements Querier with the given
-// config. conn is typically *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerierConfig(conn genericConn, cfg QuerierConfig) *DBQuerier {
-	return &DBQuerier{conn: conn, types: newTypeResolver(cfg.DataTypes)}
+	return &DBQuerier{conn: conn, types: newTypeResolver()}
 }
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
@@ -113,51 +60,13 @@ func (q *DBQuerier) WithTx(tx pgx.Tx) (*DBQuerier, error) {
 	return &DBQuerier{conn: tx}, nil
 }
 
-// preparer is any Postgres connection transport that provides a way to prepare
-// a statement, most commonly *pgx.Conn.
-type preparer interface {
-	Prepare(ctx context.Context, name, sql string) (sd *pgconn.StatementDescription, err error)
-}
-
-// PrepareAllQueries executes a PREPARE statement for all pggen generated SQL
-// queries in querier files. Typical usage is as the AfterConnect callback
-// for pgxpool.Config
-//
-// pgx will use the prepared statement if available. Calling PrepareAllQueries
-// is an optional optimization to avoid a network round-trip the first time pgx
-// runs a query if pgx statement caching is enabled.
-func PrepareAllQueries(ctx context.Context, p preparer) error {
-	if _, err := p.Prepare(ctx, voidOnlySQL, voidOnlySQL); err != nil {
-		return fmt.Errorf("prepare query 'VoidOnly': %w", err)
-	}
-	if _, err := p.Prepare(ctx, voidOnlyTwoParamsSQL, voidOnlyTwoParamsSQL); err != nil {
-		return fmt.Errorf("prepare query 'VoidOnlyTwoParams': %w", err)
-	}
-	if _, err := p.Prepare(ctx, voidTwoSQL, voidTwoSQL); err != nil {
-		return fmt.Errorf("prepare query 'VoidTwo': %w", err)
-	}
-	if _, err := p.Prepare(ctx, voidThreeSQL, voidThreeSQL); err != nil {
-		return fmt.Errorf("prepare query 'VoidThree': %w", err)
-	}
-	if _, err := p.Prepare(ctx, voidThree2SQL, voidThree2SQL); err != nil {
-		return fmt.Errorf("prepare query 'VoidThree2': %w", err)
-	}
-	return nil
-}
-
 // typeResolver looks up the pgtype.ValueTranscoder by Postgres type name.
 type typeResolver struct {
 	connInfo *pgtype.ConnInfo // types by Postgres type name
 }
 
-func newTypeResolver(types []pgtype.DataType) *typeResolver {
+func newTypeResolver() *typeResolver {
 	ci := pgtype.NewConnInfo()
-	for _, typ := range types {
-		if txt, ok := typ.Value.(textPreferrer); ok && typ.OID != unknownOID {
-			typ.Value = txt.ValueTranscoder
-		}
-		ci.RegisterDataType(typ)
-	}
 	return &typeResolver{connInfo: ci}
 }
 
@@ -192,20 +101,6 @@ func (q *DBQuerier) VoidOnly(ctx context.Context) (pgconn.CommandTag, error) {
 	return cmdTag, err
 }
 
-// VoidOnlyBatch implements Querier.VoidOnlyBatch.
-func (q *DBQuerier) VoidOnlyBatch(batch genericBatch) {
-	batch.Queue(voidOnlySQL)
-}
-
-// VoidOnlyScan implements Querier.VoidOnlyScan.
-func (q *DBQuerier) VoidOnlyScan(results pgx.BatchResults) (pgconn.CommandTag, error) {
-	cmdTag, err := results.Exec()
-	if err != nil {
-		return cmdTag, fmt.Errorf("exec VoidOnlyBatch: %w", err)
-	}
-	return cmdTag, err
-}
-
 const voidOnlyTwoParamsSQL = `SELECT void_fn_two_params($1, 'text');`
 
 // VoidOnlyTwoParams implements Querier.VoidOnlyTwoParams.
@@ -214,20 +109,6 @@ func (q *DBQuerier) VoidOnlyTwoParams(ctx context.Context, id int32) (pgconn.Com
 	cmdTag, err := q.conn.Exec(ctx, voidOnlyTwoParamsSQL, id)
 	if err != nil {
 		return cmdTag, fmt.Errorf("exec query VoidOnlyTwoParams: %w", err)
-	}
-	return cmdTag, err
-}
-
-// VoidOnlyTwoParamsBatch implements Querier.VoidOnlyTwoParamsBatch.
-func (q *DBQuerier) VoidOnlyTwoParamsBatch(batch genericBatch, id int32) {
-	batch.Queue(voidOnlyTwoParamsSQL, id)
-}
-
-// VoidOnlyTwoParamsScan implements Querier.VoidOnlyTwoParamsScan.
-func (q *DBQuerier) VoidOnlyTwoParamsScan(results pgx.BatchResults) (pgconn.CommandTag, error) {
-	cmdTag, err := results.Exec()
-	if err != nil {
-		return cmdTag, fmt.Errorf("exec VoidOnlyTwoParamsBatch: %w", err)
 	}
 	return cmdTag, err
 }
@@ -241,21 +122,6 @@ func (q *DBQuerier) VoidTwo(ctx context.Context) (string, error) {
 	var item string
 	if err := row.Scan(nil, &item); err != nil {
 		return item, fmt.Errorf("query VoidTwo: %w", err)
-	}
-	return item, nil
-}
-
-// VoidTwoBatch implements Querier.VoidTwoBatch.
-func (q *DBQuerier) VoidTwoBatch(batch genericBatch) {
-	batch.Queue(voidTwoSQL)
-}
-
-// VoidTwoScan implements Querier.VoidTwoScan.
-func (q *DBQuerier) VoidTwoScan(results pgx.BatchResults) (string, error) {
-	row := results.QueryRow()
-	var item string
-	if err := row.Scan(nil, &item); err != nil {
-		return item, fmt.Errorf("scan VoidTwoBatch row: %w", err)
 	}
 	return item, nil
 }
@@ -274,21 +140,6 @@ func (q *DBQuerier) VoidThree(ctx context.Context) (VoidThreeRow, error) {
 	var item VoidThreeRow
 	if err := row.Scan(nil, &item.Foo, &item.Bar); err != nil {
 		return item, fmt.Errorf("query VoidThree: %w", err)
-	}
-	return item, nil
-}
-
-// VoidThreeBatch implements Querier.VoidThreeBatch.
-func (q *DBQuerier) VoidThreeBatch(batch genericBatch) {
-	batch.Queue(voidThreeSQL)
-}
-
-// VoidThreeScan implements Querier.VoidThreeScan.
-func (q *DBQuerier) VoidThreeScan(results pgx.BatchResults) (VoidThreeRow, error) {
-	row := results.QueryRow()
-	var item VoidThreeRow
-	if err := row.Scan(nil, &item.Foo, &item.Bar); err != nil {
-		return item, fmt.Errorf("scan VoidThreeBatch row: %w", err)
 	}
 	return item, nil
 }
@@ -313,32 +164,6 @@ func (q *DBQuerier) VoidThree2(ctx context.Context) ([]string, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("close VoidThree2 rows: %w", err)
-	}
-	return items, err
-}
-
-// VoidThree2Batch implements Querier.VoidThree2Batch.
-func (q *DBQuerier) VoidThree2Batch(batch genericBatch) {
-	batch.Queue(voidThree2SQL)
-}
-
-// VoidThree2Scan implements Querier.VoidThree2Scan.
-func (q *DBQuerier) VoidThree2Scan(results pgx.BatchResults) ([]string, error) {
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query VoidThree2Batch: %w", err)
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var item string
-		if err := rows.Scan(&item, nil, nil); err != nil {
-			return nil, fmt.Errorf("scan VoidThree2Batch row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close VoidThree2Batch rows: %w", err)
 	}
 	return items, err
 }

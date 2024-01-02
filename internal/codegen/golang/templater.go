@@ -116,8 +116,8 @@ func (tm Templater) templateFile(file codegen.QueryFile, isLeader bool) (Templat
 	imports.AddPackage("github.com/jackc/pgconn")
 	if isLeader {
 		imports.AddPackage("github.com/jackc/pgtype")
+		imports.AddPackage("github.com/jackc/pgx/v4")
 	}
-	imports.AddPackage("github.com/jackc/pgx/v4")
 
 	pkgPath := ""
 	// NOTE: err == nil check
@@ -158,6 +158,7 @@ func (tm Templater) templateFile(file codegen.QueryFile, isLeader bool) (Templat
 				LowerName: tm.chooseLowerName(input.PgName, "unnamedParam", i, len(query.Inputs)),
 				QualType:  gotype.QualifyType(goType, pkgPath),
 				Type:      goType,
+				RawName:   query.Inputs[i],
 			}
 			ds := FindInputDeclarers(goType).ListAll()
 			declarers.AddAll(ds...)

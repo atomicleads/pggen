@@ -11,56 +11,22 @@ import (
 )
 
 // Querier is a typesafe Go interface backed by SQL queries.
-//
-// Methods ending with Batch enqueue a query to run later in a pgx.Batch. After
-// calling SendBatch on pgx.Conn, pgxpool.Pool, or pgx.Tx, use the Scan methods
-// to parse the results.
 type Querier interface {
 	FindAllDevices(ctx context.Context) ([]FindAllDevicesRow, error)
-	// FindAllDevicesBatch enqueues a FindAllDevices query into batch to be executed
-	// later by the batch.
-	FindAllDevicesBatch(batch genericBatch)
-	// FindAllDevicesScan scans the result of an executed FindAllDevicesBatch query.
-	FindAllDevicesScan(results pgx.BatchResults) ([]FindAllDevicesRow, error)
 
 	InsertDevice(ctx context.Context, mac pgtype.Macaddr, typePg DeviceType) (pgconn.CommandTag, error)
-	// InsertDeviceBatch enqueues a InsertDevice query into batch to be executed
-	// later by the batch.
-	InsertDeviceBatch(batch genericBatch, mac pgtype.Macaddr, typePg DeviceType)
-	// InsertDeviceScan scans the result of an executed InsertDeviceBatch query.
-	InsertDeviceScan(results pgx.BatchResults) (pgconn.CommandTag, error)
 
 	// Select an array of all device_type enum values.
 	FindOneDeviceArray(ctx context.Context) ([]DeviceType, error)
-	// FindOneDeviceArrayBatch enqueues a FindOneDeviceArray query into batch to be executed
-	// later by the batch.
-	FindOneDeviceArrayBatch(batch genericBatch)
-	// FindOneDeviceArrayScan scans the result of an executed FindOneDeviceArrayBatch query.
-	FindOneDeviceArrayScan(results pgx.BatchResults) ([]DeviceType, error)
 
 	// Select many rows of device_type enum values.
 	FindManyDeviceArray(ctx context.Context) ([][]DeviceType, error)
-	// FindManyDeviceArrayBatch enqueues a FindManyDeviceArray query into batch to be executed
-	// later by the batch.
-	FindManyDeviceArrayBatch(batch genericBatch)
-	// FindManyDeviceArrayScan scans the result of an executed FindManyDeviceArrayBatch query.
-	FindManyDeviceArrayScan(results pgx.BatchResults) ([][]DeviceType, error)
 
 	// Select many rows of device_type enum values with multiple output columns.
 	FindManyDeviceArrayWithNum(ctx context.Context) ([]FindManyDeviceArrayWithNumRow, error)
-	// FindManyDeviceArrayWithNumBatch enqueues a FindManyDeviceArrayWithNum query into batch to be executed
-	// later by the batch.
-	FindManyDeviceArrayWithNumBatch(batch genericBatch)
-	// FindManyDeviceArrayWithNumScan scans the result of an executed FindManyDeviceArrayWithNumBatch query.
-	FindManyDeviceArrayWithNumScan(results pgx.BatchResults) ([]FindManyDeviceArrayWithNumRow, error)
 
 	// Regression test for https://github.com/jschaf/pggen/issues/23.
 	EnumInsideComposite(ctx context.Context) (Device, error)
-	// EnumInsideCompositeBatch enqueues a EnumInsideComposite query into batch to be executed
-	// later by the batch.
-	EnumInsideCompositeBatch(batch genericBatch)
-	// EnumInsideCompositeScan scans the result of an executed EnumInsideCompositeBatch query.
-	EnumInsideCompositeScan(results pgx.BatchResults) (Device, error)
 }
 
 type DBQuerier struct {
@@ -89,74 +55,15 @@ type genericConn interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 }
 
-// genericBatch batches queries to send in a single network request to a
-// Postgres server. This is usually backed by *pgx.Batch.
-type genericBatch interface {
-	// Queue queues a query to batch b. query can be an SQL query or the name of a
-	// prepared statement. See Queue on *pgx.Batch.
-	Queue(query string, arguments ...interface{})
-}
-
 // NewQuerier creates a DBQuerier that implements Querier. conn is typically
 // *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
 func NewQuerier(conn genericConn) *DBQuerier {
-	return NewQuerierConfig(conn, QuerierConfig{})
-}
-
-type QuerierConfig struct {
-	// DataTypes contains pgtype.Value to use for encoding and decoding instead
-	// of pggen-generated pgtype.ValueTranscoder.
-	//
-	// If OIDs are available for an input parameter type and all of its
-	// transitive dependencies, pggen will use the binary encoding format for
-	// the input parameter.
-	DataTypes []pgtype.DataType
-}
-
-// NewQuerierConfig creates a DBQuerier that implements Querier with the given
-// config. conn is typically *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerierConfig(conn genericConn, cfg QuerierConfig) *DBQuerier {
-	return &DBQuerier{conn: conn, types: newTypeResolver(cfg.DataTypes)}
+	return &DBQuerier{conn: conn, types: newTypeResolver()}
 }
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
 func (q *DBQuerier) WithTx(tx pgx.Tx) (*DBQuerier, error) {
 	return &DBQuerier{conn: tx}, nil
-}
-
-// preparer is any Postgres connection transport that provides a way to prepare
-// a statement, most commonly *pgx.Conn.
-type preparer interface {
-	Prepare(ctx context.Context, name, sql string) (sd *pgconn.StatementDescription, err error)
-}
-
-// PrepareAllQueries executes a PREPARE statement for all pggen generated SQL
-// queries in querier files. Typical usage is as the AfterConnect callback
-// for pgxpool.Config
-//
-// pgx will use the prepared statement if available. Calling PrepareAllQueries
-// is an optional optimization to avoid a network round-trip the first time pgx
-// runs a query if pgx statement caching is enabled.
-func PrepareAllQueries(ctx context.Context, p preparer) error {
-	if _, err := p.Prepare(ctx, findAllDevicesSQL, findAllDevicesSQL); err != nil {
-		return fmt.Errorf("prepare query 'FindAllDevices': %w", err)
-	}
-	if _, err := p.Prepare(ctx, insertDeviceSQL, insertDeviceSQL); err != nil {
-		return fmt.Errorf("prepare query 'InsertDevice': %w", err)
-	}
-	if _, err := p.Prepare(ctx, findOneDeviceArraySQL, findOneDeviceArraySQL); err != nil {
-		return fmt.Errorf("prepare query 'FindOneDeviceArray': %w", err)
-	}
-	if _, err := p.Prepare(ctx, findManyDeviceArraySQL, findManyDeviceArraySQL); err != nil {
-		return fmt.Errorf("prepare query 'FindManyDeviceArray': %w", err)
-	}
-	if _, err := p.Prepare(ctx, findManyDeviceArrayWithNumSQL, findManyDeviceArrayWithNumSQL); err != nil {
-		return fmt.Errorf("prepare query 'FindManyDeviceArrayWithNum': %w", err)
-	}
-	if _, err := p.Prepare(ctx, enumInsideCompositeSQL, enumInsideCompositeSQL); err != nil {
-		return fmt.Errorf("prepare query 'EnumInsideComposite': %w", err)
-	}
-	return nil
 }
 
 // Device represents the Postgres composite type "device".
@@ -200,14 +107,8 @@ type typeResolver struct {
 	connInfo *pgtype.ConnInfo // types by Postgres type name
 }
 
-func newTypeResolver(types []pgtype.DataType) *typeResolver {
+func newTypeResolver() *typeResolver {
 	ci := pgtype.NewConnInfo()
-	for _, typ := range types {
-		if txt, ok := typ.Value.(textPreferrer); ok && typ.OID != unknownOID {
-			typ.Value = txt.ValueTranscoder
-		}
-		ci.RegisterDataType(typ)
-	}
 	return &typeResolver{connInfo: ci}
 }
 
@@ -327,32 +228,6 @@ func (q *DBQuerier) FindAllDevices(ctx context.Context) ([]FindAllDevicesRow, er
 	return items, err
 }
 
-// FindAllDevicesBatch implements Querier.FindAllDevicesBatch.
-func (q *DBQuerier) FindAllDevicesBatch(batch genericBatch) {
-	batch.Queue(findAllDevicesSQL)
-}
-
-// FindAllDevicesScan implements Querier.FindAllDevicesScan.
-func (q *DBQuerier) FindAllDevicesScan(results pgx.BatchResults) ([]FindAllDevicesRow, error) {
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query FindAllDevicesBatch: %w", err)
-	}
-	defer rows.Close()
-	items := []FindAllDevicesRow{}
-	for rows.Next() {
-		var item FindAllDevicesRow
-		if err := rows.Scan(&item.Mac, &item.Type); err != nil {
-			return nil, fmt.Errorf("scan FindAllDevicesBatch row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close FindAllDevicesBatch rows: %w", err)
-	}
-	return items, err
-}
-
 const insertDeviceSQL = `INSERT INTO device (mac, type)
 VALUES ($1, $2);`
 
@@ -362,20 +237,6 @@ func (q *DBQuerier) InsertDevice(ctx context.Context, mac pgtype.Macaddr, typePg
 	cmdTag, err := q.conn.Exec(ctx, insertDeviceSQL, mac, typePg)
 	if err != nil {
 		return cmdTag, fmt.Errorf("exec query InsertDevice: %w", err)
-	}
-	return cmdTag, err
-}
-
-// InsertDeviceBatch implements Querier.InsertDeviceBatch.
-func (q *DBQuerier) InsertDeviceBatch(batch genericBatch, mac pgtype.Macaddr, typePg DeviceType) {
-	batch.Queue(insertDeviceSQL, mac, typePg)
-}
-
-// InsertDeviceScan implements Querier.InsertDeviceScan.
-func (q *DBQuerier) InsertDeviceScan(results pgx.BatchResults) (pgconn.CommandTag, error) {
-	cmdTag, err := results.Exec()
-	if err != nil {
-		return cmdTag, fmt.Errorf("exec InsertDeviceBatch: %w", err)
 	}
 	return cmdTag, err
 }
@@ -390,25 +251,6 @@ func (q *DBQuerier) FindOneDeviceArray(ctx context.Context) ([]DeviceType, error
 	deviceTypesArray := q.types.newDeviceTypeArray()
 	if err := row.Scan(deviceTypesArray); err != nil {
 		return item, fmt.Errorf("query FindOneDeviceArray: %w", err)
-	}
-	if err := deviceTypesArray.AssignTo(&item); err != nil {
-		return item, fmt.Errorf("assign FindOneDeviceArray row: %w", err)
-	}
-	return item, nil
-}
-
-// FindOneDeviceArrayBatch implements Querier.FindOneDeviceArrayBatch.
-func (q *DBQuerier) FindOneDeviceArrayBatch(batch genericBatch) {
-	batch.Queue(findOneDeviceArraySQL)
-}
-
-// FindOneDeviceArrayScan implements Querier.FindOneDeviceArrayScan.
-func (q *DBQuerier) FindOneDeviceArrayScan(results pgx.BatchResults) ([]DeviceType, error) {
-	row := results.QueryRow()
-	item := []DeviceType{}
-	deviceTypesArray := q.types.newDeviceTypeArray()
-	if err := row.Scan(deviceTypesArray); err != nil {
-		return item, fmt.Errorf("scan FindOneDeviceArrayBatch row: %w", err)
 	}
 	if err := deviceTypesArray.AssignTo(&item); err != nil {
 		return item, fmt.Errorf("assign FindOneDeviceArray row: %w", err)
@@ -442,36 +284,6 @@ func (q *DBQuerier) FindManyDeviceArray(ctx context.Context) ([][]DeviceType, er
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("close FindManyDeviceArray rows: %w", err)
-	}
-	return items, err
-}
-
-// FindManyDeviceArrayBatch implements Querier.FindManyDeviceArrayBatch.
-func (q *DBQuerier) FindManyDeviceArrayBatch(batch genericBatch) {
-	batch.Queue(findManyDeviceArraySQL)
-}
-
-// FindManyDeviceArrayScan implements Querier.FindManyDeviceArrayScan.
-func (q *DBQuerier) FindManyDeviceArrayScan(results pgx.BatchResults) ([][]DeviceType, error) {
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query FindManyDeviceArrayBatch: %w", err)
-	}
-	defer rows.Close()
-	items := [][]DeviceType{}
-	deviceTypesArray := q.types.newDeviceTypeArray()
-	for rows.Next() {
-		var item []DeviceType
-		if err := rows.Scan(deviceTypesArray); err != nil {
-			return nil, fmt.Errorf("scan FindManyDeviceArrayBatch row: %w", err)
-		}
-		if err := deviceTypesArray.AssignTo(&item); err != nil {
-			return nil, fmt.Errorf("assign FindManyDeviceArray row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close FindManyDeviceArrayBatch rows: %w", err)
 	}
 	return items, err
 }
@@ -511,36 +323,6 @@ func (q *DBQuerier) FindManyDeviceArrayWithNum(ctx context.Context) ([]FindManyD
 	return items, err
 }
 
-// FindManyDeviceArrayWithNumBatch implements Querier.FindManyDeviceArrayWithNumBatch.
-func (q *DBQuerier) FindManyDeviceArrayWithNumBatch(batch genericBatch) {
-	batch.Queue(findManyDeviceArrayWithNumSQL)
-}
-
-// FindManyDeviceArrayWithNumScan implements Querier.FindManyDeviceArrayWithNumScan.
-func (q *DBQuerier) FindManyDeviceArrayWithNumScan(results pgx.BatchResults) ([]FindManyDeviceArrayWithNumRow, error) {
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query FindManyDeviceArrayWithNumBatch: %w", err)
-	}
-	defer rows.Close()
-	items := []FindManyDeviceArrayWithNumRow{}
-	deviceTypesArray := q.types.newDeviceTypeArray()
-	for rows.Next() {
-		var item FindManyDeviceArrayWithNumRow
-		if err := rows.Scan(&item.Num, deviceTypesArray); err != nil {
-			return nil, fmt.Errorf("scan FindManyDeviceArrayWithNumBatch row: %w", err)
-		}
-		if err := deviceTypesArray.AssignTo(&item.DeviceTypes); err != nil {
-			return nil, fmt.Errorf("assign FindManyDeviceArrayWithNum row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close FindManyDeviceArrayWithNumBatch rows: %w", err)
-	}
-	return items, err
-}
-
 const enumInsideCompositeSQL = `SELECT ROW('08:00:2b:01:02:03'::macaddr, 'phone'::device_type) ::device;`
 
 // EnumInsideComposite implements Querier.EnumInsideComposite.
@@ -551,25 +333,6 @@ func (q *DBQuerier) EnumInsideComposite(ctx context.Context) (Device, error) {
 	rowRow := q.types.newDevice()
 	if err := row.Scan(rowRow); err != nil {
 		return item, fmt.Errorf("query EnumInsideComposite: %w", err)
-	}
-	if err := rowRow.AssignTo(&item); err != nil {
-		return item, fmt.Errorf("assign EnumInsideComposite row: %w", err)
-	}
-	return item, nil
-}
-
-// EnumInsideCompositeBatch implements Querier.EnumInsideCompositeBatch.
-func (q *DBQuerier) EnumInsideCompositeBatch(batch genericBatch) {
-	batch.Queue(enumInsideCompositeSQL)
-}
-
-// EnumInsideCompositeScan implements Querier.EnumInsideCompositeScan.
-func (q *DBQuerier) EnumInsideCompositeScan(results pgx.BatchResults) (Device, error) {
-	row := results.QueryRow()
-	var item Device
-	rowRow := q.types.newDevice()
-	if err := row.Scan(rowRow); err != nil {
-		return item, fmt.Errorf("scan EnumInsideCompositeBatch row: %w", err)
 	}
 	if err := rowRow.AssignTo(&item); err != nil {
 		return item, fmt.Errorf("assign EnumInsideComposite row: %w", err)

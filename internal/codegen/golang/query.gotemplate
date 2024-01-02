@@ -20,20 +20,11 @@ import (
 {{- if .IsLeader -}}
 {{- "\n\n" -}}
 // Querier is a typesafe Go interface backed by SQL queries.
-//
-// Methods ending with Batch enqueue a query to run later in a pgx.Batch. After
-// calling SendBatch on pgx.Conn, pgxpool.Pool, or pgx.Tx, use the Scan methods
-// to parse the results.
 type Querier interface {
 {{- range $pkgFile := .Pkg.Files -}}
 {{- range $i, $q := $pkgFile.Queries }} {{- "\n\t" -}}
 	{{- if $q.Doc }}{{ $q.Doc }}	{{ end -}}
 	{{.Name}}(ctx context.Context {{- $q.EmitParams }}) ({{ $q.EmitResultType }}, error)
-	// {{.Name}}Batch enqueues a {{.Name}} query into batch to be executed
-	// later by the batch.
-	{{.Name}}Batch(batch genericBatch {{- $q.EmitParams }})
-	// {{.Name}}Scan scans the result of an executed {{.Name}}Batch query.
-	{{.Name}}Scan(results pgx.BatchResults) ({{ $q.EmitResultType }}, error)
 	{{- "\n" -}}
 {{end -}}
 {{- end -}}
@@ -67,34 +58,10 @@ type genericConn interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 }
 
-// genericBatch batches queries to send in a single network request to a
-// Postgres server. This is usually backed by *pgx.Batch.
-type genericBatch interface {
-	// Queue queues a query to batch b. query can be an SQL query or the name of a
-	// prepared statement. See Queue on *pgx.Batch.
-	Queue(query string, arguments ...interface{})
-}
-
 // NewQuerier creates a DBQuerier that implements Querier. conn is typically
 // *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
 func NewQuerier(conn genericConn, metrics *metrics.Metrics, tracer trace.Tracer) *DBQuerier {
-	return NewQuerierConfig(conn, QuerierConfig{}, metrics, tracer)
-}
-
-type QuerierConfig struct {
-	// DataTypes contains pgtype.Value to use for encoding and decoding instead
-	// of pggen-generated pgtype.ValueTranscoder.
-	//
-	// If OIDs are available for an input parameter type and all of its
-	// transitive dependencies, pggen will use the binary encoding format for
-	// the input parameter.
-	DataTypes []pgtype.DataType
-}
-
-// NewQuerierConfig creates a DBQuerier that implements Querier with the given
-// config. conn is typically *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerierConfig(conn genericConn, cfg QuerierConfig, metrics *metrics.Metrics, tracer trace.Tracer) *DBQuerier {
-	return &DBQuerier{conn: conn, types: newTypeResolver(cfg.DataTypes), metrics: metrics, tracer: tracer}
+	return &DBQuerier{conn: conn, types: newTypeResolver(), metrics, tracer}
 }
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
@@ -102,29 +69,6 @@ func (q *DBQuerier) WithTx(tx pgx.Tx) (*DBQuerier, error) {
 	return &DBQuerier{conn: tx}, nil
 }
 
-// preparer is any Postgres connection transport that provides a way to prepare
-// a statement, most commonly *pgx.Conn.
-type preparer interface {
-	Prepare(ctx context.Context, name, sql string) (sd *pgconn.StatementDescription, err error)
-}
-
-// PrepareAllQueries executes a PREPARE statement for all pggen generated SQL
-// queries in querier files. Typical usage is as the AfterConnect callback
-// for pgxpool.Config
-//
-// pgx will use the prepared statement if available. Calling PrepareAllQueries
-// is an optional optimization to avoid a network round-trip the first time pgx
-// runs a query if pgx statement caching is enabled.
-func PrepareAllQueries(ctx context.Context, p preparer) error {
-{{- range $pkgFile := .Pkg.Files -}}
-	{{- range $i, $q := $pkgFile.Queries }} {{- "\n\t" -}}
-	if _, err := p.Prepare(ctx, {{$q.SQLVarName}}, {{$q.SQLVarName}}); err != nil {
-		return fmt.Errorf("prepare query '{{$q.Name}}': %w", err)
-	}
-	{{- end -}}
-{{- end }}
-	return nil
-}
 {{- range .Declarers}}{{- "\n\n" -}}{{ .Declare $.PkgPath }}{{ end -}}
 {{- end -}}
 
@@ -210,51 +154,6 @@ func (q *DBQuerier) {{ $q.Name }}(ctx context.Context {{- $q.EmitParams }}) ({{ 
 	}
 	q.metrics.IncSqlSuccess("{{ $q.Name }}")
 	span.AddEvent("query complete")
-	return cmdTag, err
-{{- end }}
-}
-
-// {{$q.Name}}Batch implements Querier.{{$q.Name}}Batch.
-func (q *DBQuerier) {{.Name}}Batch(batch genericBatch {{- $q.EmitParams }}) {
-	batch.Queue({{ $q.SQLVarName }} {{- $q.EmitParamNames }})
-}
-
-// {{.Name}}Scan implements Querier.{{$q.Name}}Scan.
-func (q *DBQuerier) {{.Name}}Scan(results pgx.BatchResults) ({{ $q.EmitResultType }}, error) {
-{{- if eq $q.ResultKind ":one" }}
-	row := results.QueryRow()
-	{{ $q.EmitResultTypeInit "item" }}
-	{{- $q.EmitResultDecoders }}
-	if err := row.Scan({{ $q.EmitRowScanArgs }}); err != nil {
-		return {{ $q.EmitResultExpr "item" }}, fmt.Errorf("scan {{ $q.Name }}Batch row: %w", err)
-	}
-	{{- $q.EmitResultAssigns "item" }}
-	return {{ $q.EmitResultExpr "item" }}, nil
-{{- else if eq $q.ResultKind ":many" }}
-	rows, err := results.Query()
-	if err != nil {
-		return nil, fmt.Errorf("query {{ $q.Name }}Batch: %w", err)
-	}
-	defer rows.Close()
-	{{ $q.EmitResultTypeInit "items" }}
-	{{- $q.EmitResultDecoders }}
-	for rows.Next() {
-		var item {{ $q.EmitResultElem }}
-		if err := rows.Scan({{- $q.EmitRowScanArgs -}}); err != nil {
-			return nil, fmt.Errorf("scan {{ $q.Name }}Batch row: %w", err)
-		}
-		{{- $q.EmitResultAssigns "nil" }}
-		items = append(items, {{ $q.EmitResultExpr "item" }})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("close {{ $q.Name }}Batch rows: %w", err)
-	}
-	return items, err
-{{- else if eq $q.ResultKind ":exec" }}
-	cmdTag, err := results.Exec()
-	if err != nil {
-		return cmdTag, fmt.Errorf("exec {{ $q.Name }}Batch: %w", err)
-	}
 	return cmdTag, err
 {{- end }}
 }
