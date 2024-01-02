@@ -60,8 +60,8 @@ type genericConn interface {
 
 // NewQuerier creates a DBQuerier that implements Querier. conn is typically
 // *pgx.Conn, pgx.Tx, or *pgxpool.Pool.
-func NewQuerier(conn genericConn) *DBQuerier {
-	return &DBQuerier{conn: conn, types: newTypeResolver()}
+func NewQuerier(conn genericConn, metrics *metrics.Metrics, tracer trace.Tracer) *DBQuerier {
+	return &DBQuerier{conn: conn, types: newTypeResolver(), metrics, tracer}
 }
 
 // WithTx creates a new DBQuerier that uses the transaction to run all queries.
