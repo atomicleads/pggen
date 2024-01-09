@@ -2,7 +2,7 @@ package domain
 
 import (
 	"context"
-	"github.com/jschaf/pggen/internal/pgtest"
+	"github.com/atomicleads/pggen/internal/pgtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"

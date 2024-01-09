@@ -2,10 +2,10 @@ package composite
 
 import (
 	"context"
+	"github.com/atomicleads/pggen/internal/difftest"
+	"github.com/atomicleads/pggen/internal/pgtest"
+	"github.com/atomicleads/pggen/internal/ptrs"
 	"github.com/jackc/pgtype"
-	"github.com/jschaf/pggen/internal/difftest"
-	"github.com/jschaf/pggen/internal/pgtest"
-	"github.com/jschaf/pggen/internal/ptrs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"

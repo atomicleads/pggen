@@ -2,10 +2,10 @@ package golang
 
 import (
 	"flag"
-	"github.com/jschaf/pggen/internal/casing"
-	"github.com/jschaf/pggen/internal/codegen/golang/gotype"
-	"github.com/jschaf/pggen/internal/difftest"
-	"github.com/jschaf/pggen/internal/pg"
+	"github.com/atomicleads/pggen/internal/casing"
+	"github.com/atomicleads/pggen/internal/codegen/golang/gotype"
+	"github.com/atomicleads/pggen/internal/difftest"
+	"github.com/atomicleads/pggen/internal/pg"
 	"github.com/stretchr/testify/require"
 	"os"
 	"strings"

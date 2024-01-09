@@ -1,8 +1,8 @@
 package golang
 
 import (
-	"github.com/jschaf/pggen/internal/codegen/golang/gotype"
-	"github.com/jschaf/pggen/internal/pg"
+	"github.com/atomicleads/pggen/internal/codegen/golang/gotype"
+	"github.com/atomicleads/pggen/internal/pg"
 	"strconv"
 	"strings"
 )

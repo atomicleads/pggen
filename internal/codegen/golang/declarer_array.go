@@ -2,7 +2,7 @@ package golang
 
 import (
 	"fmt"
-	"github.com/jschaf/pggen/internal/codegen/golang/gotype"
+	"github.com/atomicleads/pggen/internal/codegen/golang/gotype"
 	"strconv"
 	"strings"
 )

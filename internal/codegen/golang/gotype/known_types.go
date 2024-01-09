@@ -1,9 +1,9 @@
 package gotype
 
 import (
+	"github.com/atomicleads/pggen/internal/pg"
+	"github.com/atomicleads/pggen/internal/pg/pgoid"
 	"github.com/jackc/pgtype"
-	"github.com/jschaf/pggen/internal/pg"
-	"github.com/jschaf/pggen/internal/pg/pgoid"
 )
 
 // FindKnownTypePgx returns the native pgx type, like pgtype.Text, if known, for

@@ -1,8 +1,8 @@
 package pggen
 
 import (
-	"github.com/jschaf/pggen/internal/pgtest"
-	"github.com/jschaf/pggen/internal/texts"
+	"github.com/atomicleads/pggen/internal/pgtest"
+	"github.com/atomicleads/pggen/internal/texts"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"path/filepath"

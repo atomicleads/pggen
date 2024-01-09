@@ -2,9 +2,9 @@ package custom_types
 
 import (
 	"context"
+	"github.com/atomicleads/pggen/internal/pgtest"
+	"github.com/atomicleads/pggen/internal/texts"
 	"github.com/jackc/pgtype"
-	"github.com/jschaf/pggen/internal/pgtest"
-	"github.com/jschaf/pggen/internal/texts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"testing"

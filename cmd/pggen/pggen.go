@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/atomicleads/pggen"
+	"github.com/atomicleads/pggen/internal/flags"
+	"github.com/atomicleads/pggen/internal/texts"
 	"github.com/bmatcuk/doublestar"
-	"github.com/jschaf/pggen"
-	"github.com/jschaf/pggen/internal/flags"
-	"github.com/jschaf/pggen/internal/texts"
 	"github.com/peterbourgon/ff/v3/ffcli"
 )
 
@@ -93,7 +93,7 @@ func newGenCmd() *ffcli.Command {
 			"or custom mapping like 'apis=APIs'")
 	goTypes := flags.Strings(fset, "go-type", nil,
 		"custom type mapping from Postgres to fully qualified Go type, "+
-			"like 'device_type=github.com/jschaf/pggen.DeviceType'")
+			"like 'device_type=github.com/atomicleads/pggen.DeviceType'")
 	inlineParamCount := fset.Int("inline-param-count", 2,
 		"number of params (inclusive) to inline when calling querier methods; 0 always generates a struct")
 	goSubCmd := &ffcli.Command{

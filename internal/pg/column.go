@@ -3,9 +3,9 @@ package pg
 import (
 	"context"
 	"fmt"
+	"github.com/atomicleads/pggen/internal/texts"
 	"github.com/jackc/pgtype"
 	"github.com/jackc/pgx/v4"
-	"github.com/jschaf/pggen/internal/texts"
 	"strconv"
 	"strings"
 	"sync"

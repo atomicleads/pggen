@@ -1,9 +1,9 @@
 package slices
 
 import (
-	"github.com/jschaf/pggen"
-	"github.com/jschaf/pggen/internal/difftest"
-	"github.com/jschaf/pggen/internal/pgtest"
+	"github.com/atomicleads/pggen"
+	"github.com/atomicleads/pggen/internal/difftest"
+	"github.com/atomicleads/pggen/internal/pgtest"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"path/filepath"

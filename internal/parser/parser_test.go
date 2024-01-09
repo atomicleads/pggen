@@ -1,9 +1,9 @@
 package parser
 
 import (
+	"github.com/atomicleads/pggen/internal/ast"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/jschaf/pggen/internal/ast"
 	gotok "go/token"
 	"testing"
 )

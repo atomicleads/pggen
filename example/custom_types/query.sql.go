@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgtype"
 	"github.com/jackc/pgx/v4"
-	"github.com/jschaf/pggen/example/custom_types/mytype"
+	"github.com/atomicleads/pggen/example/custom_types/mytype"
 )
 
 // Querier is a typesafe Go interface backed by SQL queries.

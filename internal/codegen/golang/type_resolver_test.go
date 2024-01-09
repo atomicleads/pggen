@@ -1,18 +1,18 @@
 package golang
 
 import (
+	"github.com/atomicleads/pggen/internal/casing"
+	"github.com/atomicleads/pggen/internal/codegen/golang/gotype"
+	"github.com/atomicleads/pggen/internal/difftest"
+	"github.com/atomicleads/pggen/internal/pg"
 	"github.com/google/go-cmp/cmp"
 	"github.com/jackc/pgtype"
-	"github.com/jschaf/pggen/internal/casing"
-	"github.com/jschaf/pggen/internal/codegen/golang/gotype"
-	"github.com/jschaf/pggen/internal/difftest"
-	"github.com/jschaf/pggen/internal/pg"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
 func TestTypeResolver_Resolve(t *testing.T) {
-	testPkgPath := "github.com/jschaf/pggen/internal/codegen/golang/test_resolve"
+	testPkgPath := "github.com/atomicleads/pggen/internal/codegen/golang/test_resolve"
 	caser := casing.NewCaser()
 	caser.AddAcronym("ios", "IOS")
 	caser.AddAcronym("macos", "MacOS")

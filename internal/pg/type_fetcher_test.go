@@ -2,12 +2,12 @@ package pg
 
 import (
 	"context"
+	"github.com/atomicleads/pggen/internal/pg/pgoid"
+	"github.com/atomicleads/pggen/internal/pgtest"
+	"github.com/atomicleads/pggen/internal/texts"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/jackc/pgtype"
-	"github.com/jschaf/pggen/internal/pg/pgoid"
-	"github.com/jschaf/pggen/internal/pgtest"
-	"github.com/jschaf/pggen/internal/texts"
 	"sort"
 	"testing"
 )
